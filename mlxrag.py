@@ -4133,346 +4133,6 @@ def run_indexing(args):
     
 
 
-
-def format_search_results(results, query, search_type, dense_model_id, sparse_model_id, 
-                    context_size=300, highlight=True, debug_info=True):
-    """
-    Format search results with improved display and debugging information.
-    
-    Args:
-        results: List of search result objects
-        query: The original search query
-        search_type: Type of search performed (hybrid, vector, sparse, keyword)
-        dense_model_id: ID of the dense embedding model used
-        sparse_model_id: ID of the sparse embedding model used
-        context_size: Number of characters to show around matched terms (default: 300)
-        highlight: Whether to highlight search terms (default: True)
-        debug_info: Whether to include debug information (default: True)
-        
-    Returns:
-        Dictionary containing formatted results and metadata
-    """
-    if not results:
-        return {
-            "query": query,
-            "search_type": search_type,
-            "count": 0,
-            "embedder_info": {
-                "dense": dense_model_id,
-                "sparse": sparse_model_id
-            },
-            "results": [],
-            "debug_info": {"message": "No results found"} if debug_info else None
-        }
-    
-    # Extract search terms for highlighting
-    search_terms = query.lower().split()
-    
-    formatted_results = []
-    for i, result in enumerate(results):
-        payload = result.payload if hasattr(result, "payload") else {}
-        score = getattr(result, "score", 0.0)
-        text = payload.get("text", "")
-        
-        # Get chunk size information
-        chunk_size = {
-            "characters": len(text),
-            "words": len(text.split()),
-            "lines": len(text.splitlines())
-        }
-        
-        # Find the best context to display around matched terms
-        preview = create_smart_preview(text, search_terms, context_size)
-        
-        # Highlight search terms if requested
-        if highlight:
-            preview = highlight_terms(preview, search_terms)
-        
-        # Get embedding information
-        embedder_meta = payload.get("metadata", {})
-        embedder_info = {
-            "dense_embedder": embedder_meta.get("dense_embedder", embedder_meta.get("embedder", "unknown")),
-            "sparse_embedder": embedder_meta.get("sparse_embedder", "unknown"),
-        }
-        
-        # Calculate match info for debugging
-        match_info = None
-        if debug_info:
-            match_info = {
-                "match_positions": find_term_positions(text.lower(), search_terms),
-                "total_matches": sum(1 for term in search_terms if term.lower() in text.lower()),
-                "normalized_score": score,  # May need normalization based on search_type
-            }
-        
-        formatted_results.append({
-            "rank": i + 1,
-            "score": score,
-            "id": result.id,
-            "file_path": payload.get("file_path", ""),
-            "file_name": payload.get("file_name", ""),
-            "chunk_index": payload.get("chunk_index", 0),
-            "chunk_size": chunk_size,
-            "preview": preview,
-            "text": text if debug_info else None,  # Include full text only in debug mode
-            "embedder_info": embedder_info,
-            "match_info": match_info
-        })
-    
-    # Add extra debug information
-    extra_debug = None
-    if debug_info:
-        extra_debug = {
-            "terms_searched": search_terms,
-            "average_score": sum(r["score"] for r in formatted_results) / len(formatted_results),
-            "score_range": {
-                "min": min(r["score"] for r in formatted_results),
-                "max": max(r["score"] for r in formatted_results)
-            }
-        }
-    
-    return {
-        "query": query,
-        "search_type": search_type,
-        "count": len(formatted_results),
-        "embedder_info": {
-            "dense": dense_model_id,
-            "sparse": sparse_model_id
-        },
-        "results": formatted_results,
-        "debug_info": extra_debug
-    }
-
-
-def create_smart_preview(text, search_terms, context_size=300):
-    """
-    Create a smart preview that shows context around search terms.
-    
-    Args:
-        text: The full text to extract preview from
-        search_terms: List of search terms to find in the text
-        context_size: Maximum context size in characters
-    
-    Returns:
-        A preview string with context around matched terms
-    """
-    if not text:
-        return ""
-    
-    # If text is shorter than context_size, return the whole text
-    if len(text) <= context_size:
-        return text
-    
-    # Find positions of search terms in text
-    text_lower = text.lower()
-    positions = []
-    
-    for term in search_terms:
-        term_lower = term.lower()
-        pos = text_lower.find(term_lower)
-        while pos != -1:
-            positions.append(pos)
-            pos = text_lower.find(term_lower, pos + 1)
-    
-    # If no matches found, return the beginning of the text
-    if not positions:
-        return text[:context_size] + "..."
-    
-    # Find the best window that contains the most matches
-    best_start = 0
-    best_end = min(context_size, len(text))
-    max_matches = 0
-    
-    for pos in sorted(positions):
-        start = max(0, pos - context_size // 2)
-        end = min(len(text), start + context_size)
-        
-        # Adjust window to not cut words
-        if start > 0:
-            while start > 0 and text[start] != ' ':
-                start -= 1
-            start += 1  # Move past the space
-        
-        if end < len(text):
-            while end < len(text) and text[end] != ' ':
-                end += 1
-        
-        # Count matches in this window
-        matches = sum(1 for p in positions if start <= p < end)
-        
-        if matches > max_matches:
-            max_matches = matches
-            best_start = start
-            best_end = end
-    
-    # Create preview with ellipses if needed
-    preview = ""
-    if best_start > 0:
-        preview += "..."
-    
-    preview += text[best_start:best_end]
-    
-    if best_end < len(text):
-        preview += "..."
-    
-    return preview
-
-
-def highlight_terms(text, terms, pre_tag="**", post_tag="**"):
-    """
-    Highlight search terms in text using tags (default is bold with markdown).
-    
-    Args:
-        text: Text to highlight terms in
-        terms: List of terms to highlight
-        pre_tag: Tag to insert before matched term
-        post_tag: Tag to insert after matched term
-    
-    Returns:
-        Text with highlighted terms
-    """
-    if not text or not terms:
-        return text
-    
-    # Sort terms by length (descending) to avoid partial matches
-    sorted_terms = sorted(terms, key=len, reverse=True)
-    
-    # Create a case-insensitive highlight function
-    result = text
-    for term in sorted_terms:
-        if not term or len(term) < 2:  # Skip very short terms
-            continue
-            
-        term_lower = term.lower()
-        i = result.lower().find(term_lower)
-        offset = 0
-        
-        while i != -1:
-            actual_term = result[i+offset:i+offset+len(term)]  # Get actual case from text
-            replacement = f"{pre_tag}{actual_term}{post_tag}"
-            result = result[:i+offset] + replacement + result[i+offset+len(term):]
-            offset += len(pre_tag) + len(post_tag)
-            i = result.lower().find(term_lower, i+offset+1)
-    
-    return result
-
-
-def find_term_positions(text, terms):
-    """
-    Find positions of all terms in the text.
-    
-    Args:
-        text: Text to search in
-        terms: List of terms to find
-    
-    Returns:
-        Dictionary mapping terms to lists of positions
-    """
-    positions = {}
-    
-    for term in terms:
-        term_positions = []
-        term_lower = term.lower()
-        pos = text.find(term_lower)
-        
-        while pos != -1:
-            term_positions.append(pos)
-            pos = text.find(term_lower, pos + 1)
-        
-        if term_positions:
-            positions[term] = term_positions
-    
-    return positions
-
-
-def display_search_results_cli(search_results, show_debug=False, color_output=True):
-    """
-    Display search results in a clear, readable format in the command line.
-    
-    Args:
-        search_results: The formatted search results from format_search_results
-        show_debug: Whether to show detailed debug information
-        color_output: Whether to use ANSI color codes for terminal output
-    """
-    # Terminal colors if enabled
-    if color_output:
-        RESET = "\033[0m"
-        BOLD = "\033[1m"
-        RED = "\033[31m"
-        GREEN = "\033[32m"
-        YELLOW = "\033[33m"
-        BLUE = "\033[34m"
-        MAGENTA = "\033[35m"
-        CYAN = "\033[36m"
-        HIGHLIGHT = "\033[43m"  # Yellow background
-    else:
-        RESET = BOLD = RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = HIGHLIGHT = ""
-    
-    # Header
-    print(f"\n{BOLD}{BLUE}====== Search Results ======{RESET}\n")
-    print(f"Query: {BOLD}'{search_results['query']}'{RESET}")
-    print(f"Search type: {search_results['search_type']}")
-    print(f"Using embedders: {search_results['embedder_info']['dense']} (dense), "
-        f"{search_results['embedder_info']['sparse']} (sparse)")
-    print(f"Found {BOLD}{search_results['count']}{RESET} results\n")
-    
-    if search_results['count'] == 0:
-        print(f"{YELLOW}No results found for your query.{RESET}")
-        return
-    
-    # Results
-    for result in search_results['results']:
-        print(f"{CYAN}{'=' * 60}{RESET}")
-        print(f"{BOLD}Rank: {result['rank']}, Score: {YELLOW}{result['score']:.4f}{RESET}")
-        print(f"File: {result['file_name']}")
-        print(f"Path: {result['file_path']}")
-        print(f"Chunk: {result['chunk_index']}")
-        
-        # Chunk size information
-        print(f"Chunk size: {result['chunk_size']['characters']} chars, "
-            f"{result['chunk_size']['words']} words, "
-            f"{result['chunk_size']['lines']} lines")
-        
-        print(f"Embedders: {result['embedder_info']['dense_embedder']} (dense), "
-            f"{result['embedder_info']['sparse_embedder']} (sparse)")
-        
-        # Preview with highlighted terms
-        print(f"\n{BOLD}Preview:{RESET}")
-        
-        # In the terminal, convert markdown ** to terminal formatting
-        preview = result['preview']
-        if color_output:
-            preview = preview.replace('**', HIGHLIGHT)
-            # Fix uneven highlights by adding RESET
-            if preview.count(HIGHLIGHT) % 2 != 0:
-                preview += RESET
-            else:
-                preview = preview.replace(HIGHLIGHT + HIGHLIGHT, HIGHLIGHT)
-                
-            # Make sure highlighting is reset at the end
-            preview += RESET
-        
-        print(preview)
-        print()
-        
-        # Debug information
-        if show_debug and result.get('match_info'):
-            print(f"{MAGENTA}Match Info:{RESET}")
-            match_info = result['match_info']
-            print(f"  Total matches: {match_info['total_matches']}")
-            print(f"  Normalized score: {match_info['normalized_score']:.4f}")
-            print(f"  Match positions: {match_info['match_positions']}")
-            print()
-    
-    # Overall debug information
-    if show_debug and search_results.get('debug_info'):
-        print(f"\n{MAGENTA}{'=' * 60}{RESET}")
-        print(f"{BOLD}{MAGENTA}Debug Information:{RESET}")
-        debug = search_results['debug_info']
-        print(f"Terms searched: {debug['terms_searched']}")
-        print(f"Average score: {debug['average_score']:.4f}")
-        print(f"Score range: {debug['score_range']['min']:.4f} - {debug['score_range']['max']:.4f}")
-
-
 def run_search(args):
     """Run search on the existing collection with enhanced display and relevance"""
     # 1. Initialize Qdrant manager
@@ -4537,7 +4197,9 @@ def run_search(args):
     relevance_tuning = getattr(args, 'relevance_tuning', True)
     context_size = getattr(args, 'context_size', 300)
     score_threshold = getattr(args, 'score_threshold', None)
+    rerank = getattr(args, 'rerank', False)  # Add support for reranking parameter
     
+    # Use the search method from QdrantManager
     results = qdrant.search(
         query=args.query,
         search_type=args.search_type,
@@ -4547,52 +4209,75 @@ def run_search(args):
         fusion_type=args.fusion,
         relevance_tuning=relevance_tuning,
         context_size=context_size,
-        score_threshold=score_threshold
+        score_threshold=score_threshold,
+        rerank=rerank
     )
     
-    # 4. Display results with enhanced formatting
-    show_debug = getattr(args, 'debug', False)
-    color_output = not getattr(args, 'no_color', False)
-    
-    # Use the new display function if available, otherwise fall back to basic display
+    # 4. Display results 
     if "error" in results:
         print(f"Error: {results['error']}")
         return
-        
-    # Check if enhanced display function is available
-    if 'display_search_results_cli' in globals():
-        display_search_results_cli(results, show_debug=show_debug, color_output=color_output)
+    
+    # Use terminal colors if enabled
+    show_debug = getattr(args, 'debug', False)
+    color_output = not getattr(args, 'no_color', False)
+    
+    if color_output:
+        RESET = "\033[0m"
+        BOLD = "\033[1m"
+        BLUE = "\033[34m"
+        YELLOW = "\033[33m"
+        CYAN = "\033[36m"
+        HIGHLIGHT = "\033[43m"  # Yellow background
     else:
-        # Basic display as fallback
-        print("\n====== Search Results ======")
-        print(f"Query: '{args.query}'")
-        print(f"Search type: {args.search_type}")
+        RESET = BOLD = BLUE = YELLOW = CYAN = HIGHLIGHT = ""
+    
+    # Display header
+    print(f"\n{BOLD}{BLUE}====== Search Results ======{RESET}\n")
+    print(f"Query: {BOLD}'{results['query']}'{RESET}")
+    print(f"Search type: {results['search_type']}")
+    print(f"Using embedders: {results['embedder_info']['dense']} (dense), "
+          f"{results['embedder_info']['sparse']} (sparse)")
+    print(f"Found {BOLD}{results['count']}{RESET} results\n")
+    
+    if results['count'] == 0:
+        print(f"{YELLOW}No results found for your query.{RESET}")
+        return
+    
+    # Display results
+    for result in results['results']:
+        print(f"{CYAN}{'=' * 60}{RESET}")
+        print(f"{BOLD}Rank: {result['rank']}, Score: {YELLOW}{result['score']:.4f}{RESET}")
+        print(f"File: {result['file_name']}")
+        print(f"Path: {result['file_path']}")
+        print(f"Chunk: {result['chunk_index']}")
         
-        # Print embedder information
-        if "embedder_info" in results:
-            print(f"Using embedders: {results['embedder_info']['dense']} (dense), {results['embedder_info']['sparse']} (sparse)")
+        # Chunk size information
+        print(f"Chunk size: {result['chunk_size']['characters']} chars, "
+              f"{result['chunk_size']['words']} words, "
+              f"{result['chunk_size']['lines']} lines")
         
-        print(f"Found {results['count']} results")
+        print(f"Embedders: {result['embedder_info']['dense_embedder']} (dense), "
+              f"{result['embedder_info']['sparse_embedder']} (sparse)")
         
-        for result in results["results"]:
-            print("\n-------------------")
-            print(f"Rank: {result['rank']}, Score: {result['score']:.4f}")
-            print(f"File: {result['file_name']}")
-            print(f"Path: {result['file_path']}")
-            print(f"Chunk: {result['chunk_index']}")
-            
-            # Display chunk size information if available
-            if "chunk_size" in result:
-                print(f"Chunk size: {result['chunk_size']['characters']} chars, "
-                      f"{result['chunk_size']['words']} words, "
-                      f"{result['chunk_size']['lines']} lines")
-            
-            # Display embedder information for this result
-            if "embedder_info" in result:
-                print(f"Embedders: {result['embedder_info']['dense_embedder']} (dense), "
-                      f"{result['embedder_info']['sparse_embedder']} (sparse)")
+        # Preview with highlighted terms
+        print(f"\n{BOLD}Preview:{RESET}")
+        
+        # Convert markdown ** to terminal formatting
+        preview = result['preview']
+        if color_output:
+            preview = preview.replace('**', HIGHLIGHT)
+            # Fix uneven highlights by adding RESET
+            if preview.count(HIGHLIGHT) % 2 != 0:
+                preview += RESET
+            else:
+                preview = preview.replace(HIGHLIGHT + HIGHLIGHT, HIGHLIGHT)
                 
-            print(f"Preview: {result['preview']}")
+            # Make sure highlighting is reset at the end
+            preview += RESET
+        
+        print(preview)
+        print()
 
 
 def main():
