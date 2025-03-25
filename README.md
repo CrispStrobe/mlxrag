@@ -1,17 +1,18 @@
 # RAG Index and Search with MLX and SPLADE Support
 
-A python based document indexing and search tool that combines dense and sparse vector embeddings for different search methods (vector, hybrid) using Qdrant as the vector database backend.
+A python based document indexing and search tool that combines dense and sparse vector embeddings for different search methods (vector, hybrid) using Qdrant as the vector database backend and streamlit for browser frontend.
 
 ## Overview
 
-This script provides an integrating framework for document indexing and retrieval making use of:
+Provides an integrating framework for document indexing and retrieval making use of:
 
 - **Dense Embeddings**: For semantic similarity using MLX and transformer models (BERT, BGE, E5, etc)
 - **Sparse Embeddings**: Using SPLADE for lexical search / token-based retrieval with term expansion
 - **Hybrid Search**: Combines dense and sparse approaches for optimal results
 - **MLX Acceleration**: Uses Apple's MLX for efficient embedding generation on Apple Silicon
-- **Document Processing**: Support for TXT, MD, HTML, PDF, JSON, CSV files, chunking with token limit enforcement, basic Metadata extraction and storage
- payload 
+- **Document Processing**: Support for TXT, MD, HTML, PDF, JSON, CSV files, chunking with token limit enforcement, basic Metadata extraction and payload storage
+ 
+A streamlit-based frontend user interface enables indexing and searching via browser.
 
 ## Requirements
 
@@ -23,6 +24,7 @@ This script provides an integrating framework for document indexing and retrieva
   - PyTorch (fallback when MLX is not available)
   - psutil (for memory monitoring)
   - tqdm (for progress bars)
+  - streamlit
 
 ## Installation
 
@@ -31,10 +33,18 @@ This script provides an integrating framework for document indexing and retrieva
 pip install qdrant-client transformers
 
 # Recommended additional packages
-pip install mlx mlx_embedding_models PyPDF2 tqdm psutil torch
+pip install mlx mlx_embedding_models PyPDF2 tqdm psutil torch streamlit
 ```
 
 ## Usage
+
+### Browser frontend
+
+A streamlit-based search interface is available to simplify interactive exploration and retrieval from indexed documents.
+
+```bash
+streamlit run mlxrag_ui.py
+```
 
 ### Indexing Documents
 
