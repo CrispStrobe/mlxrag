@@ -39,7 +39,7 @@ pip install mlx mlx_embedding_models PyPDF2 tqdm psutil torch
 ### Indexing Documents
 
 ```bash
-python enhanced_qdrant_indexer.py index documents_directory \
+python mlxrag.py index documents_directory \
   --use-mlx-models \
   --dense-model bge-small \
   --sparse-model distilbert-splade \
@@ -50,23 +50,23 @@ python enhanced_qdrant_indexer.py index documents_directory \
 
 ```bash
 # Hybrid search (both dense and sparse)
-python enhanced_qdrant_indexer.py search "your search query" \
+python mlxrag.py search "your search query" \
   --search-type hybrid \
   --use-mlx-models
 
 # Sparse-only search for lexical matching
-python enhanced_qdrant_indexer.py search "exact terms to match" \
+python mlxrag.py search "exact terms to match" \
   --search-type sparse
 
 # Dense vector search for semantic similarity
-python enhanced_qdrant_indexer.py search "semantic concept" \
+python mlxrag.py search "semantic concept" \
   --search-type vector
 ```
 
 ### List Available Models
 
 ```bash
-python enhanced_qdrant_indexer.py list-models
+python mlxrag.py list-models
 ```
 
 ## Command Line Arguments
@@ -134,7 +134,7 @@ python enhanced_qdrant_indexer.py list-models
 
 ```bash
 # Index a directory with both dense and sparse embeddings
-python enhanced_qdrant_indexer.py index ~/documents \
+python mlxrag.py index ~/documents \
   --include "*.pdf *.txt *.md" \
   --use-mlx-models \
   --dense-model bge-small \
@@ -147,7 +147,7 @@ python enhanced_qdrant_indexer.py index ~/documents \
 
 ```bash
 # Run a hybrid search with relevance tuning
-python enhanced_qdrant_indexer.py search "quantum computing applications" \
+python mlxrag.py search "quantum computing applications" \
   --search-type hybrid \
   --use-mlx-models \
   --dense-model bge-small \
@@ -164,7 +164,7 @@ python enhanced_qdrant_indexer.py search "quantum computing applications" \
 
 ```bash
 # Index using a custom model from Hugging Face
-python enhanced_qdrant_indexer.py index ~/documents \
+python mlxrag.py index ~/documents \
   --use-mlx-models \
   --custom-repo-id "my-org/my-custom-model" \
   --custom-ndim 768 \
